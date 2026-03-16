@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+            maven 'Maven3'
+        }
+
     environment {
         DOCKER_REGISTRY     = "docker.io"
         DOCKER_IMAGE        = "awoke/awoke-student-api"
