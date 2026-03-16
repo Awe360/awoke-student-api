@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        DOCKER_REGISTRY     = "https://index.docker.io/v1/"
+        DOCKER_REGISTRY     = "docker.io"
         DOCKER_IMAGE        = "awoke/awoke-student-api"
         IMAGE_TAG           = "${env.BUILD_NUMBER}"
         DOCKER_CRED_ID      = "dockerhub-credentials"
