@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: awoke-student-api
+  namespace: default
+  labels:
+    app: awoke-student-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: awoke-student-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: awoke-student-api
+    spec:
+      containers:
+        - name: awoke-student-api
+          image: awoke/awoke-student-api:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - containerPort: 8181
+              name: http
+
+
+      restartPolicy: Always
