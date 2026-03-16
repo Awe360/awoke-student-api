@@ -1,13 +1,7 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.9.9-eclipse-temurin-21'
-            args '-v /var/run/docker.sock:/var/run/docker.sock --user root'
-        }
-    }
+    agent any  // ← Change back to 'any' or a normal node that has kubectl (for deploy stage)
 
     environment {
-        DOCKER_REGISTRY     = "docker.io"
         DOCKER_IMAGE        = "awoke/awoke-student-api"
         IMAGE_TAG           = "${env.BUILD_NUMBER}"
         DOCKER_CRED_ID      = "dockerhub-credentials"
@@ -24,47 +18,66 @@ pipeline {
         }
 
         stage('Build & Test') {
+            agent {
+                docker {
+                    image 'maven:3.9.9-eclipse-temurin-21'
+                    args '-v ${WORKSPACE}:/workspace'  // share workspace if needed
+                }
+            }
             steps {
                 echo "Building Spring Boot application with Maven (JDK 21)..."
                 sh 'mvn clean package -DskipTests'
             }
         }
 
-        stage('Build & Push Docker Image') {
+        stage('Build & Push Docker Image with Kaniko') {
+            agent {
+                docker {
+                    image 'gcr.io/kaniko-project/executor:debug'  // Kaniko image
+                    args '--user root'
+                }
+            }
             steps {
                 script {
-                    echo "Building Docker image → ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    echo "Building & pushing Docker image → ${DOCKER_IMAGE}:${IMAGE_TAG} using Kaniko"
 
-                    docker.withRegistry(DOCKER_REGISTRY, DOCKER_CRED_ID) {
-                        def customImage = docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}", ".")
-                        customImage.push()
-                        customImage.push('latest')
+                    withCredentials([usernamePassword(
+                        credentialsId: DOCKER_CRED_ID,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh """
+                            echo '{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\"${DOCKER_USER}\",\"password\":\"${DOCKER_PASS}\"}}}' > /kaniko/.docker/config.json
+
+                            /kaniko/executor \
+                                --context \${PWD} \
+                                --dockerfile Dockerfile \
+                                --destination ${DOCKER_IMAGE}:${IMAGE_TAG} \
+                                --destination ${DOCKER_IMAGE}:latest \
+                                --cache=true
+                        """
                     }
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
+            agent any  // or your normal agent with kubectl
             steps {
                 script {
                     echo "Deploying to Kubernetes (namespace: ${NAMESPACE})"
 
                     withCredentials([file(credentialsId: KUBE_CRED_ID, variable: 'KUBECONFIG')]) {
                         sh """
-                            # Simple image update (fast rolling update)
                             kubectl set image deployment/${DEPLOYMENT_NAME} \
                                 awoke-student-api=${DOCKER_IMAGE}:${IMAGE_TAG} \
-                                -n ${NAMESPACE} \
-                                --record
+                                -n ${NAMESPACE} --record
 
-                            # Re-apply manifests if needed
                             kubectl apply -f k8s/deployment.yaml -n ${NAMESPACE}
                             kubectl apply -f k8s/service.yaml   -n ${NAMESPACE}
 
-                            # Wait for rollout
                             kubectl rollout status deployment/${DEPLOYMENT_NAME} \
-                                -n ${NAMESPACE} \
-                                --timeout=180s
+                                -n ${NAMESPACE} --timeout=180s
                         """
                     }
                 }
@@ -80,7 +93,6 @@ pipeline {
             echo "❌ Pipeline failed. Check console output for details."
         }
         always {
-            sh 'docker system prune -f --filter "label=build=jenkins" || true'
             archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
         }
     }
