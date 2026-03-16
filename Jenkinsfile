@@ -32,7 +32,7 @@ pipeline {
         stage('Build & Push Docker Image with Kaniko') {
             agent {
                 docker {
-                    image 'gcr.io/kaniko-project/executor:debug-v1.5.2'
+                    image 'gcr.io/kaniko-project/executor:debug'
                     args '-v ${PWD}:/workspace'
                 }
             }
