@@ -17,7 +17,7 @@ public class StudentRepository {
 
     @PostConstruct
     public void init() {
-        save(new Student(null, "Abebe", "Kebede", "abebe.kebede@example.com", 21, "Computer Science"));
+        save(new Student(null, "Awoke", "Gebrie", "awokegebrie5@gmail.com", 24, "Computer Engineering"));
         save(new Student(null, "Sara", "Alemu", "sara.alemu@example.com", 22, "Electrical Engineering"));
         save(new Student(null, "Dawit", "Tadesse", "dawit.tadesse@example.com", 20, "Mechanical Engineering"));
         save(new Student(null, "Hanna", "Girma", "hanna.girma@example.com", 23, "Software Engineering"));
