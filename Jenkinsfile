@@ -1,79 +1,62 @@
 pipeline {
-    agent none
+    agent any
 
     environment {
-        DOCKER_IMAGE        = "awoke/awoke-student-api"
-        IMAGE_TAG           = "${env.BUILD_NUMBER}"
-        DOCKER_CRED_ID      = "dockerhub-credentials"
-        KUBE_CRED_ID        = "minikube-kubeconfig"
-        NAMESPACE           = "default"
-        DEPLOYMENT_NAME     = "awoke-student-api"
+        DOCKER_REGISTRY          = "docker.io"
+        DOCKER_IMAGE             = "awoke/awoke-student-api"
+        IMAGE_TAG                = "${env.BUILD_NUMBER}"
+        NAMESPACE                = "default"
+        KUBECONFIG_CREDENTIAL_ID = "minikube-kubeconfig"
+        DOCKER_HUB_CREDENTIAL_ID = "dockerhub-credentials"
     }
 
     stages {
-        stage('Checkout') {
-            agent any
+        stage('Install Dependencies') {
             steps {
-                checkout scm
+                echo 'Installing dependencies...'
+                sh 'mvn dependency:go-offline -B'
             }
         }
 
-        stage('Maven Build') {
-            agent {
-                docker {
-                    image 'maven:3.9.9-eclipse-temurin-21'
-                    reuseNode true
-                }
-            }
+        stage('Verify App') {
             steps {
-                sh 'mvn clean package -DskipTests'
+                echo 'Verifying app (build & skip tests for now)...'
+                sh '''
+                    mvn clean verify -DskipTests=true
+                    echo "Skipping full smoke test for now – in-memory API"
+                '''
             }
         }
 
-        stage('Build & Push with Kaniko') {
-            agent {
-                docker {
-                    image 'gcr.io/kaniko-project/executor:v1.23.2'
-                    args '-v ${PWD}:/workspace --entrypoint=""'
-                    reuseNode true
-                }
-            }
+        stage('Docker Build & Push') {
             steps {
-                withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CRED_ID,
-                    usernameVariable: 'USER',
-                    passwordVariable: 'PASS'
-                )]) {
-                    sh '''
-                        mkdir -p /kaniko/.docker
-                        echo "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"$(echo -n ${USER}:${PASS} | base64)\"}}}" > /kaniko/.docker/config.json
-
-                        executor \
-                            --context /workspace \
-                            --dockerfile /workspace/Dockerfile \
-                            --destination ${DOCKER_IMAGE}:${IMAGE_TAG} \
-                            --destination ${DOCKER_IMAGE}:latest \
-                            --cache=true
-                    '''
+                script {
+                    echo "Building & pushing Docker image: ${DOCKER_IMAGE}:${IMAGE_TAG}"
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_HUB_CREDENTIAL_ID) {
+                        def customImage = docker.build("${DOCKER_IMAGE}:${IMAGE_TAG}")
+                        customImage.push()          // pushes :${BUILD_NUMBER}
+                        customImage.push('latest')  // also pushes :latest
+                    }
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
-            agent any
             steps {
-                withCredentials([file(credentialsId: KUBE_CRED_ID, variable: 'KUBECONFIG')]) {
-                    sh '''
-                        kubectl set image deployment/${DEPLOYMENT_NAME} \
-                            awoke-student-api=${DOCKER_IMAGE}:${IMAGE_TAG} \
-                            -n ${NAMESPACE} --record
+                script {
+                    echo "Deploying to Kubernetes namespace: ${NAMESPACE}"
+                    withCredentials([file(credentialsId: KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG')]) {
+                        sh """
+                            kubectl set image deployment/awoke-student-api \
+                                awoke-student-api=${DOCKER_IMAGE}:${IMAGE_TAG} -n ${NAMESPACE}
 
-                        kubectl apply -f k8s/deployment.yaml -n ${NAMESPACE}
-                        kubectl apply -f k8s/service.yaml   -n ${NAMESPACE}
+                            kubectl apply -f k8s/ -n ${NAMESPACE}
 
-                        kubectl rollout status deployment/${DEPLOYMENT_NAME} \
-                            -n ${NAMESPACE} --timeout=180s
-                    '''
+                            kubectl rollout status deployment/awoke-student-api \
+                                -n ${NAMESPACE} \
+                                --timeout=180s
+                        """
+                    }
                 }
             }
         }
@@ -81,13 +64,13 @@ pipeline {
 
     post {
         success {
-            echo "Deployment of ${IMAGE_TAG} completed successfully"
+            echo "🚀 Deployment of version ${IMAGE_TAG} succeeded!"
         }
         failure {
-            echo "Pipeline failed"
+            echo "❌ Build or Deployment failed. Check the logs."
         }
         always {
-            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+            sh 'docker system prune -f || true'
         }
     }
 }
