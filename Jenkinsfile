@@ -1,5 +1,5 @@
 pipeline {
-    agent any  // ← Change back to 'any' or a normal node that has kubectl (for deploy stage)
+    agent any
 
     environment {
         DOCKER_IMAGE        = "awoke/awoke-student-api"
@@ -21,7 +21,6 @@ pipeline {
             agent {
                 docker {
                     image 'maven:3.9.9-eclipse-temurin-21'
-                    args '-v ${WORKSPACE}:/workspace'  // share workspace if needed
                 }
             }
             steps {
@@ -33,8 +32,8 @@ pipeline {
         stage('Build & Push Docker Image with Kaniko') {
             agent {
                 docker {
-                    image 'gcr.io/kaniko-project/executor:debug'  // Kaniko image
-                    args '--user root'
+                    image 'gcr.io/kaniko-project/executor:debug-v1.5.2'
+                    args '-v ${PWD}:/workspace'
                 }
             }
             steps {
@@ -46,23 +45,24 @@ pipeline {
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
-                        sh """
-                            echo '{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\"${DOCKER_USER}\",\"password\":\"${DOCKER_PASS}\"}}}' > /kaniko/.docker/config.json
+                        sh '''
+                            echo "{\"auths\":{\"https://index.docker.io/v1/\":{\"username\":\"${DOCKER_USER}\",\"password\":\"${DOCKER_PASS}\"}}}" > /kaniko/.docker/config.json
 
                             /kaniko/executor \
-                                --context \${PWD} \
-                                --dockerfile Dockerfile \
-                                --destination ${DOCKER_IMAGE}:${IMAGE_TAG} \
-                                --destination ${DOCKER_IMAGE}:latest \
-                                --cache=true
-                        """
+                                --context "${PWD}" \
+                                --dockerfile "${PWD}/Dockerfile" \
+                                --destination "${DOCKER_IMAGE}:${IMAGE_TAG}" \
+                                --destination "${DOCKER_IMAGE}:latest" \
+                                --cache=true \
+                                --verbosity=debug
+                        '''
                     }
                 }
             }
         }
 
         stage('Deploy to Kubernetes') {
-            agent any  // or your normal agent with kubectl
+            agent any
             steps {
                 script {
                     echo "Deploying to Kubernetes (namespace: ${NAMESPACE})"
