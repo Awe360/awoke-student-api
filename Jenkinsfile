@@ -80,8 +80,6 @@ pipeline {
         failure {
             echo "Pipeline failed"
         }
-        always {
-            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
-        }
+
     }
 }
